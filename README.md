@@ -21,10 +21,10 @@ A local-first AI study companion built for the DEV.to Hacktoberfest Weekend 2026
 React (Vite + TS + Tailwind) → FastAPI (/api/*) → services → AI/RAG layer → Google Gemini API (Gemma 4 + hosted embeddings) + local ChromaDB
 ```
 
-- Frontend never calls Google. Backend owns AI orchestration (ADR-006).
+- Frontend never calls Google. Backend owns AI orchestration.
 - Model names are env-configured (`GEMMA_MODEL`, `EMBEDDING_MODEL`); key is backend-only (`GOOGLE_API_KEY`); single Google caller (`backend/app/services/ai_provider.py` behind the `ai.py` facade).
-- RAG: extract → clean → page-aware chunk → cloud embed → local ChromaDB (`studymate_chunks`) → top-k retrieval → threshold + budget → Gemma 4 grounded generation → citations. See `docs/RAG.md`.
-- Metadata store: SQLite via stdlib (ADR-008). Documents, metadata, and vectors stay on-device; only inference is cloud (ADR-009). The app is no longer fully offline.
+- RAG: extract → clean → page-aware chunk → cloud embed → local ChromaDB (`studymate_chunks`) → top-k retrieval → threshold + budget → Gemma 4 grounded generation → citations.
+- Metadata store: SQLite via stdlib. Documents, metadata, and vectors stay on-device; only inference is cloud. The app is no longer fully offline.
 
 ## Technology stack
 
@@ -54,12 +54,11 @@ Open http://localhost:5173. Tests run from `backend/`: `python -m pytest tests -
 
 ## Testing
 
-46 backend tests: health + envelope, chunking (page-aware, overlap, metadata), documents (valid/invalid/empty/corrupt/oversize/traversal/delete), chat (not-found, 404 scope, 422, threshold filtering, real citations, idempotent clear), provider (missing key, invalid key, quota/timeout/model errors, empty output, health states, malformed-JSON retry, end-to-end RAG/summary/quiz/flashcards through the provider facade, clean error surfacing), quiz scoring/weak-topics/validation, summaries, flashcards, study-plan validation, progress aggregation, settings. Live-model end-to-end requires the owner's key and is tracked in `docs/TASKS.md`.
+46 backend tests: health + envelope, chunking (page-aware, overlap, metadata), documents (valid/invalid/empty/corrupt/oversize/traversal/delete), chat (not-found, 404 scope, 422, threshold filtering, real citations, idempotent clear), provider (missing key, invalid key, quota/timeout/model errors, empty output, health states, malformed-JSON retry, end-to-end RAG/summary/quiz/flashcards through the provider facade, clean error surfacing), quiz scoring/weak-topics/validation, summaries, flashcards, study-plan validation, progress aggregation, settings. Live-model end-to-end verification requires the owner's key.
 
 ## Project structure
 
 ```
-docs/          PRD, architecture, design, AI/RAG, API, data model, rules, tasks, testing, setup, memory, decisions, diagrams
 frontend/src/  pages (Landing, Dashboard, Notes, Ask, Summaries, Quiz, Flashcards, Study Plan, Settings, NotFound), components (Layout, brand, dashboard/*, EmptyState, icons, Markdown, Reveal, SourceScope, ui), lib/api.ts
 backend/app/   main.py, core (config, db, errors), api/routes/*, services (documents, chunks, ai, vector, chat, quizzes, flashcards, summaries, plans, progress), schemas
 backend/tests/ fixtures (stdlib-built PDFs), health/chunks/documents/chat/learn tests
@@ -84,8 +83,8 @@ Storage warning: uploads, SQLite, and ChromaDB live under `backend/data/`, which
 ## Limitations
 
 - A `GOOGLE_API_KEY` is required for AI answers, summaries, quiz/flashcard generation, and cloud embeddings; without it those paths return honest 503s while upload, scoring, plans, progress, and settings keep working.
-- Text-extractable PDFs only — scanned images need OCR (future work, see `docs/RAG.md`).
-- Single local user, no auth; synchronous generation (no job queue); 60-day plan horizon cap. See `ponytail:` comments and `docs/DECISIONS.md`.
+- Text-extractable PDFs only — scanned images need OCR (future work).
+- Single local user, no auth; synchronous generation (no job queue); 60-day plan horizon cap. See `ponytail:` code comments.
 
 ## Future improvements
 
@@ -98,7 +97,7 @@ Provider live verification with owner key, OCR for scanned PDFs, spaced-repetiti
 
 ## Contribution
 
-Issues and PRs welcome. Read `docs/RULES.md` first, keep `docs/TASKS.md` truthful, never commit `.env`, never fabricate citations or feedback.
+Issues and PRs welcome. Never commit `.env`, never fabricate citations or feedback.
 
 ## License
 
