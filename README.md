@@ -1,34 +1,181 @@
 # StudyMate — Your notes. Your AI. Your study space.
 
-A local-first AI study companion built for the DEV.to Hacktoberfest Weekend 2026 **Build for a Friend** challenge. Upload your PDFs → ask grounded questions → practice with quizzes and flashcards → follow a study plan → track weak topics. Your documents, vectors, and metadata stay on your machine; AI inference runs through the Google Gemini API using a backend-held key (cloud inference, not fully offline).
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-## Problem
+StudyMate turns a student's PDFs and notes into a grounded AI study workspace for asking questions, summaries, quizzes, flashcards, study plans, and progress tracking.
 
-[FRIEND_NAME] studies from long PDFs/notes ([FRIEND_SUBJECT]) but struggles to turn them into explanations, revision material, practice questions, and a routine ([FRIEND_STUDY_PROBLEM]). StudyMate removes that mechanical friction, not via the open web, but from the student's own material.
+**[Live Demo](https://studymate-frontend-hbi2.onrender.com/) · [GitHub Repository](https://github.com/codewithvishuuu/studymate)**
 
-## Features
+Built for the DEV.to Hacktoberfest Weekend 2026 **Build for a Friend** challenge — a grounded AI study companion built for a friend, powered by Gemma and RAG.
 
-- PDF upload with validation, per-page extraction, processing status
-- Document library (filter, view, delete with vector cleanup)
-- Ask StudyMate: grounded answers with filename + page citations, or an explicit not-found message
-- Summaries (short / key-points), quiz generation + scoring with weak-topic detection
-- Flashcards (keyboard-first review), deterministic study plans, progress dashboard
-- Settings: profile, study goal, live AI-engine status
+## Live Demo
+
+Try StudyMate directly in your browser: **https://studymate-frontend-hbi2.onrender.com/**
+
+Upload study material, ask grounded questions, generate summaries and quizzes, practice flashcards, and build a study plan.
+
+> Ephemeral storage: the current Render free deployment uses ephemeral storage. Uploaded documents and history live under `backend/data/` (uploads, SQLite, ChromaDB) and should not be considered permanent — redeploys and restarts can wipe them unless a persistent disk is attached.
+
+## What it is
+
+StudyMate uses a local-first data architecture for documents, metadata, SQLite state, and ChromaDB vectors, while AI inference and cloud embeddings are handled through the Google Gemini API from the backend.
+
+It is not fully offline AI, not offline Gemma inference, and not permanent cloud storage. The frontend never calls Google directly — the backend owns all AI orchestration with a backend-held key.
 
 ## Architecture
 
-```
-React (Vite + TS + Tailwind) → FastAPI (/api/*) → services → AI/RAG layer → Google Gemini API (Gemma 4 + hosted embeddings) + local ChromaDB
+```mermaid
+flowchart TD
+    User([Student]) --> FE["React + TypeScript + Vite + Tailwind"]
+    FE --> API["FastAPI API (/api/*)"]
+    API --> SVC["Service Layer"]
+    SVC --> DOCS["Documents"]
+    SVC --> CHAT["Chat"]
+    SVC --> SUM["Summaries"]
+    SVC --> QUIZ["Quizzes"]
+    SVC --> CARDS["Flashcards"]
+    SVC --> PLANS["Study Plans"]
+    SVC --> PROG["Progress"]
+    SVC --> RAG["AI / RAG Layer"]
+    RAG --> EXT["PDF extraction"]
+    RAG --> CHUNK["Page-aware chunking"]
+    RAG --> EMB["Embeddings"]
+    RAG --> RET["ChromaDB retrieval"]
+    RAG --> FILT["Context filtering"]
+    RAG --> GEN["Grounded generation"]
+    RAG --> GAPI["Google Gemini API"]
+    GAPI --> GEMMA["Gemma 4"]
+    GAPI --> GEMEMB["Gemini Embeddings"]
+    SVC --- SQL[("SQLite")]
+    RAG --- CHROMA[("ChromaDB")]
+    SVC --- STORE["PDF / document storage"]
 ```
 
 - Frontend never calls Google. Backend owns AI orchestration.
-- Model names are env-configured (`GEMMA_MODEL`, `EMBEDDING_MODEL`); key is backend-only (`GOOGLE_API_KEY`); single Google caller (`backend/app/services/ai_provider.py` behind the `ai.py` facade).
-- RAG: extract → clean → page-aware chunk → cloud embed → local ChromaDB (`studymate_chunks`) → top-k retrieval → threshold + budget → Gemma 4 grounded generation → citations.
-- Metadata store: SQLite via stdlib. Documents, metadata, and vectors stay on-device; only inference is cloud. The app is no longer fully offline.
+- Model names are env-configured (`GEMMA_MODEL`, `EMBEDDING_MODEL`); the key is backend-only (`GOOGLE_API_KEY`); the single Google caller is `backend/app/services/ai_provider.py` behind the `ai.py` facade.
+- Metadata store: SQLite via stdlib (`studymate.db`). Vectors: local ChromaDB collection `studymate_chunks`. Documents: `backend/data/uploads/`. Only inference and embeddings are cloud.
 
-## Technology stack
+## RAG Pipeline
 
-Frontend: React 19, TypeScript, Vite, Tailwind CSS v4, react-router-dom. Backend: Python 3.11, FastAPI, Pydantic, pypdf, chromadb, httpx, google-genai. AI: Gemma 4 (`gemma-4-26b-a4b-it`, open-weight) via the Google Gemini API + Google-hosted embeddings (`gemini-embedding-001`). No accounts; one backend-held API key.
+PDF → text extraction (`pypdf`) → cleaning → page-aware chunking → cloud embeddings → ChromaDB → semantic retrieval → threshold and context budget → Gemma generation → grounded answer → source and page citations.
+
+- Extraction is per page, so every chunk keeps `document_id`, `filename`, `page_number`, and `chunk_id`. Citations point back to the source document and page.
+- Retrieval uses top-k (`rag_top_k`, default 5) with a relevance floor (`rag_min_score`, default 0.10) and a context budget (`rag_max_context_chars`, default 12000).
+- Not-found behavior is explicit. When nothing relevant is retrieved, or when the model refuses on the retrieved context, the answer is exactly:
+
+  `I couldn't find this information in your uploaded study material.`
+
+  The system does not fabricate citations — unused neighbors are never presented as sources.
+
+## Query flow
+
+```mermaid
+flowchart TD
+    Q([Student Question]) --> QE["Query Embedding"]
+    QE --> SS["ChromaDB Similarity Search"]
+    SS --> RC["Relevant Chunks"]
+    RC --> CF["Context Filtering / Budget"]
+    CF --> G["Gemma 4"]
+    G --> A["Grounded Answer"]
+    A --> C["Source + Page Citations"]
+```
+
+Terminology matches the code: `ai.embed` → `vector.query` → score threshold + char budget → `ai.generate` → `sources` with `document_id`, `filename`, `page`, `excerpt`, and `chunk_id`.
+
+## Features
+
+### Notes & Materials
+
+Upload and manage study PDFs with processing status and document metadata.
+
+### Ask
+
+Ask questions grounded in selected study material with source/page citations.
+
+### Summaries
+
+Generate revision-ready summaries from selected documents (`short` and `key-points` modes).
+
+### Quiz
+
+Generate quizzes with configurable count (1–20) and difficulty (`easy`, `medium`, `hard`) and track results and weak topics.
+
+### Flashcards
+
+Practice active recall using generated flashcards.
+
+### Study Plan
+
+Create a revision roadmap based on subject, exam date, and available study time (10–480 minutes per day, 60-day horizon cap).
+
+### Progress
+
+Track study activity and progress — documents, quizzes taken, questions asked, average score, weak topics, and completed sessions.
+
+### Settings
+
+Manage profile and study preferences and inspect AI configuration exposed by the backend.
+
+## Why Gemma?
+
+Gemma is part of the core generation pipeline, not a decorative feature:
+
+Student question → retrieval from their material → relevant context → Gemma 4 → grounded response.
+
+- Generation model: `gemma-4-26b-a4b-it` (open-weight Gemma family, env-configured via `GEMMA_MODEL`).
+- Embeddings: `gemini-embedding-001` (Google-hosted, env-configured via `EMBEDDING_MODEL`).
+- The deployed version serves Gemma through the Google Gemini API. There is no local inference — no Ollama, no GPU needed.
+
+## Deployment
+
+- Frontend: Render Static Site
+- Backend: Render Web Service
+
+```text
+Frontend (VITE_BACKEND_URL)
+  ↓
+Backend (FastAPI)
+  ↓
+Google Gemini API
+```
+
+- Frontend: https://studymate-frontend-hbi2.onrender.com/
+- Backend: https://studymate-backend-zujy.onrender.com/
+- Health check: `GET /api/health`
+- The frontend uses a Render SPA rewrite (`/*` → `/index.html`) so client-side routes can be refreshed directly.
+- `VITE_BACKEND_URL` is baked in at frontend build time; `FRONTEND_URL` must allowlist the frontend origin for CORS; `GOOGLE_API_KEY` stays a backend secret and is never committed.
+- Note: `render.yaml` in the repo is a blueprint with placeholder URLs. The live deployment uses the `hbi2` frontend and `zujy` backend URLs above.
+
+## Project structure
+
+```text
+frontend/
+  src/
+    pages/
+    components/
+    lib/
+
+backend/
+  app/
+    api/
+    core/
+    services/
+    schemas/
+  tests/
+```
+
+Only directories shown — every path above exists. Key routes: `GET /api/health`, `POST /api/documents/upload`, `GET /api/documents`, `GET /api/documents/{doc_id}`, `DELETE /api/documents/{doc_id}`, `POST /api/chat`, `DELETE /api/chat/{session_id}`, `POST /api/summaries/generate`, `POST /api/quiz/generate`, `POST /api/quiz/submit`, `POST /api/flashcards/generate`, `POST /api/study-plan/generate`, `GET /api/progress`, `GET /api/settings`, `PUT /api/settings`.
+
+## Data & privacy model
+
+- Documents are processed by the backend (`pypdf` extraction, validation, 50 MB limit).
+- SQLite stores application metadata and state.
+- ChromaDB stores vector embeddings and retrieval data.
+- AI inference uses the Google Gemini API.
+- API credentials remain backend-side.
+- The frontend does not directly call Google AI services.
+
+No additional privacy guarantees are claimed beyond what the code shows.
 
 ## Setup
 
@@ -50,47 +197,42 @@ npm install
 npm run dev
 ```
 
-Open http://localhost:5173. Tests run from `backend/`: `python -m pytest tests -q` (all mocked — no key needed). Real provider smoke test (needs your key): `python scripts/gemini_smoke.py` from `backend/`. Frontend build: `npm run build`. Never commit `.env` (see `.env.example`).
+Open http://localhost:5173. Never commit `.env` (see `.env.example`).
 
 ## Testing
 
-46 backend tests: health + envelope, chunking (page-aware, overlap, metadata), documents (valid/invalid/empty/corrupt/oversize/traversal/delete), chat (not-found, 404 scope, 422, threshold filtering, real citations, idempotent clear), provider (missing key, invalid key, quota/timeout/model errors, empty output, health states, malformed-JSON retry, end-to-end RAG/summary/quiz/flashcards through the provider facade, clean error surfacing), quiz scoring/weak-topics/validation, summaries, flashcards, study-plan validation, progress aggregation, settings. Live-model end-to-end verification requires the owner's key.
+46 backend tests, all mocked — no key needed. Run from `backend/`: `python -m pytest tests -q`.
 
-## Project structure
+Covers: health, page-aware chunking (overlap, metadata), documents (valid, invalid, empty, corrupt, oversize, traversal, delete with vector cleanup), chat (not-found, 404 scope, 422 validation, threshold filtering, real citations, idempotent clear), provider (missing key, invalid key, quota, timeout, model errors, empty output, health states, malformed-JSON retry, end-to-end RAG, summary, quiz, and flashcards through the provider facade), quiz scoring and weak topics, summaries, flashcards, study-plan validation, progress aggregation, and settings.
 
-```
-frontend/src/  pages (Landing, Dashboard, Notes, Ask, Summaries, Quiz, Flashcards, Study Plan, Settings, NotFound), components (Layout, brand, dashboard/*, EmptyState, icons, Markdown, Reveal, SourceScope, ui), lib/api.ts
-backend/app/   main.py, core (config, db, errors), api/routes/*, services (documents, chunks, ai, vector, chat, quizzes, flashcards, summaries, plans, progress), schemas
-backend/tests/ fixtures (stdlib-built PDFs), health/chunks/documents/chat/learn tests
-```
-
-## Deployment (Render)
-
-`render.yaml` at the repo root defines both services. Do not deploy yet without reading the storage warning below.
-
-Backend (Web Service, `backend/` as root):
-- Build: `pip install -r requirements.txt` · Start: `uvicorn app.main:app --host 0.0.0.0 --port $PORT` · Python `3.11.9` (pinned via `PYTHON_VERSION` in `render.yaml` and `backend/.python-version`)
-- Health check: `GET /api/health`
-- Env vars: `GOOGLE_API_KEY` (secret), `GEMMA_MODEL`, `EMBEDDING_MODEL`, `FRONTEND_URL` (public frontend URL, required for CORS)
-
-Frontend (Static Site, `frontend/` as root):
-- Build: `npm install && npm run build` · Publish: `dist`
-- SPA fallback: `/*` rewrites to `/index.html` (declared in `render.yaml`)
-- Env var: `VITE_BACKEND_URL` (public backend URL, baked in at build time)
-
-Storage warning: uploads, SQLite, and ChromaDB live under `backend/data/`, which is ephemeral on Render — redeploys/restarts wipe user documents, vectors, and history unless a persistent disk is attached (requires a paid instance; a 1 GB disk mount is declared in `render.yaml`). Do not promise permanent storage on ephemeral hosting.
+Real provider smoke test (needs your key): `python scripts/gemini_smoke.py` from `backend/`. Frontend build: `npm run build`.
 
 ## Limitations
 
-- A `GOOGLE_API_KEY` is required for AI answers, summaries, quiz/flashcard generation, and cloud embeddings; without it those paths return honest 503s while upload, scoring, plans, progress, and settings keep working.
-- Text-extractable PDFs only — scanned images need OCR (future work).
-- Single local user, no auth; synchronous generation (no job queue); 60-day plan horizon cap. See `ponytail:` code comments.
+- A `GOOGLE_API_KEY` is required for AI answers, summaries, quiz and flashcard generation, and cloud embeddings. Without it those paths return honest 503s, while upload validation, quiz scoring, plans, progress, and settings keep working.
+- Text-extractable PDFs only — scanned images need OCR (future work). Password-protected and corrupt PDFs are rejected with explicit errors.
+- Current deployment uses ephemeral Render storage — uploads, SQLite, and ChromaDB can be wiped on redeploy or restart.
+- Single user, no authentication.
+- Synchronous generation — no background job queue; long generations block the request.
+- Provider configuration: `gemma-4-26b-a4b-it` for generation and `gemini-embedding-001` for embeddings via the Google Gemini API.
 
 ## Future improvements
 
-Provider live verification with owner key, OCR for scanned PDFs, spaced-repetition scheduler, reranker + hybrid retrieval, Postgres/auth for multi-user, background job queue, device-tested responsive pass.
+- OCR for scanned PDFs
+- Better retrieval and reranking
+- Hybrid search
+- Spaced repetition
+- Persistent production database and storage
+- Authentication and multi-user support
+- Background job queue
+- Better study analytics
+- More local inference options
+
+Future features are not implemented yet.
 
 ## Friend handoff
+
+Built for the DEV.to Hacktoberfest Weekend 2026 **Build for a Friend** challenge.
 
 - Friend: [FRIEND_NAME] · Subject: [FRIEND_SUBJECT] · Problem: [FRIEND_STUDY_PROBLEM]
 - Handoff date: [TBD] · Feedback: [FRIEND_FEEDBACK] (never fabricated — filled in after real use)
